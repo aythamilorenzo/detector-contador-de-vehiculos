@@ -1,103 +1,118 @@
 import cv2
 import numpy as np
 
-
-def obtener_fondo(video):
+def extraer_fondo(video):
     cap = cv2.VideoCapture(video)
-
-    # Variables para acumular frames
+    
     ret, frame = cap.read()
-    avg_frame = np.zeros_like(frame, np.float32)  # acumulador en float para que no se desborde cuando supere 255
-
-    # Volvemos al inicio
-    cap.set(cv2.CAP_PROP_POS_FRAMES, 0) # Empezar desde el primer frame
-
-    # Sumar todos los frames
+    if not ret:
+        print("Error: no se pudo leer el video.")
+        return
+    
+    avg_frame = np.zeros_like(frame, np.float32)
+    
+    cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
     count = 0
+    
     while True:
         ret, frame = cap.read()
         if not ret:
             break
-        # Convertir a float y acumular
         avg_frame += frame.astype(np.float32)
         count += 1
 
-    cap.release() # libera los recursos del vídeo
-
-    # Dividir entre el número de frames -> promedio
+    cap.release()
+    
     background = avg_frame / count
-
-    # Convertimos de nuevo a uint8 para verlo
-    background = cv2.convertScaleAbs(background) # convertimos a uint8 (0-255)
-
-    # Mostrar y guardar
-    scale = 0.5  # o 0.6, 0.7... ajusta según tu pantalla
-    cv2.imshow("Background", cv2.resize(background, (0,0), fx=scale, fy=scale))
-    cv2.imwrite("background.jpg", cv2.resize(background, (0,0), fx=scale, fy=scale))
+    background = cv2.convertScaleAbs(background)
+    
+    cv2.imshow("Background", background)
+    cv2.imwrite("background.jpg", background)
     cv2.waitKey(0)
     cv2.destroyAllWindows()
 
-def obtener_coches(video, fondo):
-    
+
+def detectar_coches(video, background, min_area):
+    # Cargar fondo y convertir a escala de grises
+    fondo = cv2.imread(background)
+    fondo_gray = cv2.cvtColor(fondo, cv2.COLOR_BGR2GRAY)
     
     cap = cv2.VideoCapture(video)
-    
-    background = cv2.imread(fondo)
-
-    min_area = 100# Ajusta según necesites
-    max_area = 1500
-
+    cv2.namedWindow("Detección de coches", cv2.WINDOW_NORMAL)
+    cv2.resizeWindow("Detección de coches", 960, 540)
     while True:
         ret, frame = cap.read()
         if not ret:
             break
         
-        # Calcular diferencia absoluta
-        diff = cv2.absdiff(frame, background)
-        gray = cv2.cvtColor(diff, cv2.COLOR_BGR2GRAY)
+        # Convertimos el frame a gris
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         
-        # Umbralización
-        _, umbralizado = cv2.threshold(gray, 50, 255, cv2.THRESH_BINARY)
+        # Restamos el fondo
+        diff = cv2.absdiff(gray, fondo_gray)
+        
+        # Suavizamos un poco para reducir ruido (Gaussian Blur)
+        blur = cv2.GaussianBlur(diff, (5, 5), 0)
+        
+        # Umbralizamos: todo lo diferente al fondo se vuelve blanco
+        _, umbralizado = cv2.threshold(blur, 42, 255, cv2.THRESH_BINARY)
+        # También puedes probar threshold adaptativo si la luz cambia mucho:
+        # thresh = cv2.adaptiveThreshold(blur, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+        #                                cv2.THRESH_BINARY, 11, 2)
 
-        kernel_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (8, 8))
-        umbralizado = cv2.morphologyEx(umbralizado, cv2.MORPH_CLOSE, kernel_close)
+        # Operaciones morfológicas para limpiar ruido
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (7, 7))
         
-        # Apertura opcional: elimina ruido pequeño residual
-        kernel_open = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-        umbralizado = cv2.morphologyEx(umbralizado, cv2.MORPH_OPEN, kernel_open)
+        # Dilatar para rellenar huecos
+        dilatado = cv2.dilate(umbralizado, kernel, iterations=2)
+        
+         # Cerrar para unir regiones cercanas
+        cerrado = cv2.morphologyEx(dilatado, cv2.MORPH_CLOSE, kernel, iterations=2)
+        
+        # Abrir para eliminar ruido suelto
+        umbralizado = cv2.morphologyEx(cerrado, cv2.MORPH_OPEN, kernel, iterations=1)
+        
+    
+        
+        mask = np.zeros_like(umbralizado, dtype=np.uint8)
 
-        # Mostrar resultados intermedios (opcional, para depuración)
-        scale = 0.5  # o 0.6, 0.7... ajusta según tu pantalla
-        cv2.imshow("Umbralizado", cv2.resize(umbralizado, (0,0), fx=scale, fy=scale))
-        cv2.imshow("Diferencia sin umbral", cv2.resize(diff, (0,0), fx=scale, fy=scale))
-        
-        # Encontrar contornos
-        contours, _ = cv2.findContours(umbralizado, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        output_frame = frame.copy()
-        
-        for contour in contours:
-            area = cv2.contourArea(contour)
-            if min_area < area < max_area:
-                x, y, w, h = cv2.boundingRect(contour)
-                cv2.rectangle(output_frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
-                
-                
-       
-        cv2.imshow("Blops", cv2.resize(output_frame, (0,0), fx=scale, fy=scale))            
+        # Ejemplo: solo analizar desde Y=300 hasta el final (ignorar el fondo lejano)
+        # y excluir los últimos 120 px de la esquina inferior derecha donde están los números
+        alto, ancho = umbralizado.shape
+        cv2.rectangle(mask, (0, 320), (ancho, alto - 120), 255, -1)
+
+        # Aplicamos la máscara
+        umbralizado = cv2.bitwise_and(umbralizado, mask)
+
+        # (Opcional) Visualizar la ROI
+        # frame_masked = cv2.bitwise_and(frame, frame, mask=mask)
+        # cv2.imshow("ROI", frame_masked)
         
 
-        if cv2.waitKey(34) & 0xFF == ord('q'):
+        contornos, _ = cv2.findContours(umbralizado, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        for contorno in contornos:
+            area = cv2.contourArea(contorno)
+            if area > min_area:
+                x, y, w, h = cv2.boundingRect(contorno)
+                cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)                
+        
+        # Mostrar resultado
+        cv2.imshow("Detección de coches", umbralizado)
+        cv2.imshow("Blops marcados", frame)
+        
+        # Salir con 'q'
+        if cv2.waitKey(30) & 0xFF == ord('q'):
             break
-        
 
     cap.release()
     cv2.destroyAllWindows()
-        
+
 def main():
-        
-    obtener_coches('OpenCV-Perception/trafico01.mp4','OpenCV-Perception/background.jpg' )
-    obtener_fondo('OpenCV-Perception/trafico01.mp4')
+    # extraer_fondo("OpenCV-Perception/trafico01.mp4")
+    detectar_coches('OpenCV-Perception/trafico01.mp4', 'background.jpg', 500)
     
+
 if __name__ == '__main__':
     main()
     
