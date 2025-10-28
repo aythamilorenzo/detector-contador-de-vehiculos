@@ -1,5 +1,29 @@
 import cv2
 import numpy as np
+import math
+
+
+class Vehiculo:
+    def __init__(self, id, x, y, w, h):
+        self.id = id
+        self.x = x
+        self.y = y
+        self.w = w
+        self.h = h
+        self.centroid = (int(x + w / 2), int(y + h / 2))
+        self.lost_frames = 0  # Para manejar desapariciones
+
+    def actualizar(self, x, y, w, h):
+        self.x = x
+        self.y = y
+        self.w = w
+        self.h = h
+        self.centroid = (int(x + w / 2), int(y + h / 2))
+        self.lost_frames = 0
+
+
+def distancia(p1, p2):
+    return math.hypot(p1[0] - p2[0], p1[1] - p2[1])
 
 def extraer_fondo(video):
     cap = cv2.VideoCapture(video)
@@ -32,12 +56,14 @@ def extraer_fondo(video):
     cv2.destroyAllWindows()
 
 
-def detectar_coches(video, background, min_area):
+def detectar_vehiculos(video, background, min_area):
     # Cargar fondo y convertir a escala de grises
     fondo = cv2.imread(background)
     fondo_gray = cv2.cvtColor(fondo, cv2.COLOR_BGR2GRAY)
     
     cap = cv2.VideoCapture(video)
+    vehiculos = [] # Lista para almacenar los objetos de la casa público
+    id_counter = 0
     cv2.namedWindow("Detección de coches", cv2.WINDOW_NORMAL)
     cv2.resizeWindow("Detección de coches", 960, 540)
     while True:
@@ -90,12 +116,39 @@ def detectar_coches(video, background, min_area):
         
 
         contornos, _ = cv2.findContours(umbralizado, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        blobs = []
         
         for contorno in contornos:
             area = cv2.contourArea(contorno)
             if area > min_area:
                 x, y, w, h = cv2.boundingRect(contorno)
+                blobs.append((x, y, w, h))                
                 cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)                
+                
+        for (x, y, w, h) in blobs:
+            nuevo_centro = (int(x + w / 2), int(y + h / 2))
+            match = None
+            
+            for vehiculo in vehiculos:
+                if distancia(vehiculo.centroid, nuevo_centro) < 50:
+                    match = vehiculo
+                    break 
+
+            if match:
+                match.actualizar(x, y, w, h)
+            else:
+                id_counter += 1
+                nuevo = Vehiculo(id_counter, x, y, w, h)
+                vehiculos.append(nuevo)
+        
+        # Para contar un vehículo, seguirlo 10 frames y a partir de ahí, considerarlo vehículo.
+        # Max_area.
+        # Escoger la distancia mínima para hacer match de coches, no la primera.
+        
+
+        total_vehiculos = len(vehiculos)
+        cv2.putText(frame, f"Numero de vehiculos: {total_vehiculos}", (30, 50),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)                            
         
         # Mostrar resultado
         cv2.imshow("Detección de coches", umbralizado)
@@ -110,7 +163,7 @@ def detectar_coches(video, background, min_area):
 
 def main():
     # extraer_fondo("OpenCV-Perception/trafico01.mp4")
-    detectar_coches('OpenCV-Perception/trafico01.mp4', 'background.jpg', 500)
+    detectar_vehiculos('OpenCV-Perception/trafico01.mp4', 'background.jpg', 500)
     
 
 if __name__ == '__main__':
