@@ -40,7 +40,8 @@ def extraer_fondo(video):
     
     avg_frame = np.zeros_like(frame, np.float32)
     
-    cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+    # set se utiliza para establecer un valor de propiedad del video.
+    cap.set(cv2.CAP_PROP_POS_FRAMES, 0) # Nos aseguramos de empezar desde el principio, nos movemos al frame 0.
     count = 0
     
     while True:
@@ -53,7 +54,7 @@ def extraer_fondo(video):
     cap.release()
     
     background = avg_frame / count
-    background = cv2.convertScaleAbs(background)
+    background = cv2.convertScaleAbs(background) # Convertir de float32 a uint8 en valor absoluto.
     
     cv2.imshow("Background", background)
     cv2.imwrite("background.jpg", background)
@@ -69,7 +70,7 @@ def detectar_vehiculos(video, background, min_area, dist_thresh, frames_thresh, 
     cap = cv2.VideoCapture(video)
     vehiculos = [] # Lista para almacenar los objetos de la clase Vehículo
     id_counter = 0
-    total_contados = 0
+    total_contados = 0 # Contador de vehículos totales contados.
 
         
     while True:
@@ -77,7 +78,7 @@ def detectar_vehiculos(video, background, min_area, dist_thresh, frames_thresh, 
         if not ret:
             break
         
-        # Convertimos el frame a gris
+        # Convertimos el frame a gris, más fácil para procesar.
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         
         # Restamos el fondo
@@ -89,7 +90,6 @@ def detectar_vehiculos(video, background, min_area, dist_thresh, frames_thresh, 
         # Umbralizamos: todo lo diferente al fondo se vuelve blanco
         # Umbralizado estableciendo el umbral manualmente:
             # _, umbralizado = cv2.threshold(blur, 42, 255, cv2.THRESH_BINARY)
-        # También puedes probar threshold adaptativo si la luz cambia mucho:
         
         # Esto elige automáticamente el mejor umbral según el histograma del frame:
         _, umbralizado = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
@@ -118,38 +118,42 @@ def detectar_vehiculos(video, background, min_area, dist_thresh, frames_thresh, 
         
         mask = np.zeros_like(umbralizado, dtype=np.uint8)
 
-        # Ejemplo: solo analizar desde Y=300 hasta el final (ignorar el fondo lejano)
+        # Ejemplo: solo analizar desde Y=320 hasta el final (ignorar el fondo lejano)
         # y excluir los últimos 120 px de la esquina inferior derecha donde están los números
         alto, ancho = umbralizado.shape
-        cv2.rectangle(mask, (0, 320), (ancho, alto - 120), 255, -1)
+        cv2.rectangle(mask, (0, 320), (ancho, alto - 120), 255, -1) # -1 rellena el rectángulo de blanco.
 
         # Aplicamos la máscara
-        umbralizado = cv2.bitwise_and(umbralizado, mask)
+        umbralizado = cv2.bitwise_and(umbralizado, mask) # Operación AND entre la imagen umbralizada y la máscara.
 
         # (Opcional) Visualizar la ROI
-        # frame_masked = cv2.bitwise_and(frame, frame, mask=mask)
+        # frame_masked = cv2.bitwise_and(frame, frame, mask=mask) # Apllocamos la máscara al frame original.
+        # Hace la operacion AND entre frame y frame, dejando solo la máscara.
         # cv2.imshow("ROI", frame_masked)
         
-        
-        contornos, _ = cv2.findContours(umbralizado, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        # Analiza imagen binaria para encontrar los bordes de todos los blops.
+        contornos, _ = cv2.findContours(umbralizado, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE) # En _ se guarda la jerarquía, describe la relación entre contornos, no interesa aquí.
+        # Se recuperan solo los contornos externos (RETR_EXTERNAL)
+        # Guarda todos los puntos de los contornos, pero simplificados (CHAIN_APPROX_SIMPLE).
         blobs = []
         
         for contorno in contornos:
-            area = cv2.contourArea(contorno)
+            area = cv2.contourArea(contorno) # Calcula el mejor rectángulo que encierra el contorno y devuelve x, y, w, h.
             if area > min_area:
                 x, y, w, h = cv2.boundingRect(contorno)
                 blobs.append((x, y, w, h))                
-                cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)                
+                cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2) # El  parámetro 2 es el grosor del rectángulo.               
                 
-        vistos = set()
-        usados = set()   ### <- NUEVO: vehículos ya emparejados este frame        
+        vistos = set()   # Para rastrear qué vehículos han sido vistos en este frame.
+        usados = set()   # Para evitar ids duplicados en un mismo frame. 
+        # Se utiliza usados por si un vehículo es el mejor match para dos blobs diferentes en el mismo frame.       
         for (x, y, w, h) in blobs:
             centro = (int(x + w / 2), int(y + h / 2))
             min_d = float('inf')
             match = None
             for vehiculo in vehiculos:
                 if vehiculo in usados:
-                    continue
+                    continue    # Salta al siguiente vehículo si ya ha sido usado en este frame.
                 d = distancia(vehiculo.centroid, centro)
                 if d < min_d and d < dist_thresh:
                     min_d = d
@@ -157,7 +161,7 @@ def detectar_vehiculos(video, background, min_area, dist_thresh, frames_thresh, 
             if match:
                 match.actualizar(x, y, w, h)
                 vistos.add(match)
-                usados.add(match)   ### <- NUEVO: marcar como usado
+                usados.add(match)   
                 if not match.contado and match.tracked_frames >= frames_thresh:
                     total_contados += 1
                     match.contado = True
@@ -172,8 +176,8 @@ def detectar_vehiculos(video, background, min_area, dist_thresh, frames_thresh, 
                 vehiculos.append(vehiculo)
                 vistos.add(vehiculo)
                 
-                cv2.putText(frame, f"id: {vehiculo.id}", (x, y - 10),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
+                cv2.putText(frame, f"id: {vehiculo.id}", (x, y - 10), # Esquina inferior izquierda de la imagen.
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2) # 0.6 es la escala de la fuente (por defecto es 1), 2 es el grosor.
 
         for vehiculo in vehiculos:
             if vehiculo not in vistos:
