@@ -7,6 +7,11 @@ Este proyecto consiste en un sistema de visión artificial capaz de detectar y c
 ## 📌 Descripción
 El programa procesa un flujo de vídeo y utiliza técnicas de procesamiento digital de imágenes para identificar el movimiento, rastrear los vehículos y registrar cuántos cruzan líneas de detección específicas configuradas para tres carriles distintos.
 
+## 🚀 Demostración en Vivo
+Mira el sistema en acción detectando y contando vehículos en tiempo real:
+
+![Demo del Contador de Vehículos](App/demoapp.gif)
+
 ## 🚀 Características
 * **Detección de Movimiento:** Utiliza el sustractor de fondo `MOG2` para aislar objetos en movimiento.
 * **Procesamiento Morfológico:** Aplicación de filtros para eliminar ruido y mejorar la precisión de los contornos.
